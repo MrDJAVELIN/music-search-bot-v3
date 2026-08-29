@@ -80,27 +80,19 @@ bot.action(/^track:(.+)$/, async (ctx) => {
   const data = getTrack(id);
 
   if (!data) {
-    await ctx.reply("Трек не найден");
-    return;
+    return ctx.reply("Трек не найден");
   }
 
   const { url, title, artist } = data;
 
-  // Callback Telegram нужно закрыть максимально быстро.
-  try {
-    await ctx.answerCbQuery("Скачивание...");
-  } catch (e) {
-    console.error("answerCbQuery error:", e);
-  }
+  await ctx.answerCbQuery("Скачивание...");
 
   const msg = await ctx.reply("⏳ Загрузка...");
-  let filePath;
+
+  const start = Date.now();
 
   try {
-    const start = Date.now();
-
-    const result = await download(url);
-    filePath = result.filePath;
+    const { filePath } = await download(url);
 
     const time = ((Date.now() - start) / 1000).toFixed(1);
 
@@ -108,45 +100,30 @@ bot.action(/^track:(.+)$/, async (ctx) => {
       ctx.chat.id,
       msg.message_id,
       undefined,
-      `📤 Отправляю файл...`,
+      `✅ ${title} - ${artist} (${time}s)`,
     );
 
     await ctx.replyWithAudio(
       {
-        source: fs.readFileSync(filePath),
+        source: fs.createReadStream(filePath),
         filename: `${title}.mp3`,
       },
       {
-        title,
+        title: title,
         performer: artist,
       },
     );
+
+    fs.unlink(filePath, () => {});
+  } catch (e) {
+    console.error(e);
 
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       msg.message_id,
       undefined,
-      `✅ ${title} - ${artist} (${time}s)`,
+      "❌ Ошибка загрузки",
     );
-  } catch (e) {
-    console.error("Download/send error:", e);
-
-    try {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        msg.message_id,
-        undefined,
-        "❌ Ошибка загрузки",
-      );
-    } catch (editError) {
-      console.error("Failed to edit status message:", editError);
-    }
-  } finally {
-    if (filePath) {
-      fs.unlink(filePath, (err) => {
-        if (err) console.error("Failed to delete file:", err);
-      });
-    }
   }
 });
 
