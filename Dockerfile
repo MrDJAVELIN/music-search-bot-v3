@@ -1,10 +1,11 @@
-FROM oven/bun:1
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+COPY package.json package-lock.json ./
+
+RUN npm install
 
 COPY . .
 
-CMD ["bun", "run", "bot"]
+CMD ["npm", "run", "bot"]
