@@ -17,7 +17,7 @@ const isPrivate = (ctx) => ctx.chat?.type === "private";
 
 bot.start(async (ctx) => {
   await ctx.reply(
-    `🎵 **SoundCloud Downloader**
+    `🎵 SoundCloud Downloader
 
     Поиск и скачивание треков из SoundCloud.
 
