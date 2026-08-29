@@ -111,11 +111,9 @@ bot.action(/^track:(.+)$/, async (ctx) => {
       `📤 Отправляю файл...`,
     );
 
-    const file = fs.readFileSync(filePath);
-
     await ctx.replyWithAudio(
       {
-        source: file,
+        source: fs.readFileSync(filePath),
         filename: `${title}.mp3`,
       },
       {
