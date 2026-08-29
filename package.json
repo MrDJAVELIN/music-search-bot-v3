@@ -7,7 +7,7 @@
   "type": "module",
   "main": "src/main.js",
   "scripts": {
-    "start": "node ."
+    "bot": "node ."
   },
   "dependencies": {
     "dotenv": "^17.4.2",
