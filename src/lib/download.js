@@ -12,26 +12,43 @@ if (!fs.existsSync(tempDir)) {
 }
 
 export async function download(url) {
+  console.log("1. getInfo:", url);
+
   const track = await scdl.getInfo(url);
+  console.log("2. getInfo OK:", track.title);
+
   const stream = await scdl.download(url);
+  console.log("3. stream OK");
 
   const filePath = path.join(tempDir, `${Date.now()}.mp3`);
 
-  await pipeline(stream, fs.createWriteStream(filePath));
+  await new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(filePath);
 
-  const stat = await fs.promises.stat(filePath);
+    stream.on("error", (err) => {
+      console.error("STREAM ERROR:", err);
+      reject(err);
+    });
 
-  if (stat.size === 0) {
-    await fs.promises.unlink(filePath).catch(() => {});
-    throw new Error("Downloaded file is empty");
-  }
+    file.on("error", (err) => {
+      console.error("FILE ERROR:", err);
+      reject(err);
+    });
 
-  console.log(`Downloaded: ${filePath} (${stat.size} bytes)`);
+    file.on("finish", () => {
+      console.log("4. FILE FINISHED");
+      resolve();
+    });
 
-  const artist = track.user?.username || track.user?.permalink || "unknown";
+    stream.pipe(file);
+  });
+
+  const stat = fs.statSync(filePath);
+
+  console.log("5. FILE SIZE:", stat.size);
 
   return {
     filePath,
-    filename: `${track.title} - ${artist}`,
+    filename: `${track.title} - ${track.user?.username || "unknown"}.mp3`,
   };
 }
