@@ -80,19 +80,27 @@ bot.action(/^track:(.+)$/, async (ctx) => {
   const data = getTrack(id);
 
   if (!data) {
-    return ctx.reply("Трек не найден");
+    await ctx.reply("Трек не найден");
+    return;
   }
 
   const { url, title, artist } = data;
 
-  await ctx.answerCbQuery("Скачивание...");
+  // Callback Telegram нужно закрыть максимально быстро.
+  try {
+    await ctx.answerCbQuery("Скачивание...");
+  } catch (e) {
+    console.error("answerCbQuery error:", e);
+  }
 
   const msg = await ctx.reply("⏳ Загрузка...");
-
-  const start = Date.now();
+  let filePath;
 
   try {
-    const { filePath } = await download(url);
+    const start = Date.now();
+
+    const result = await download(url);
+    filePath = result.filePath;
 
     const time = ((Date.now() - start) / 1000).toFixed(1);
 
@@ -100,7 +108,7 @@ bot.action(/^track:(.+)$/, async (ctx) => {
       ctx.chat.id,
       msg.message_id,
       undefined,
-      `✅ ${title} - ${artist} (${time}s)`,
+      `📤 Отправляю файл...`,
     );
 
     await ctx.replyWithAudio(
@@ -109,21 +117,36 @@ bot.action(/^track:(.+)$/, async (ctx) => {
         filename: `${title}.mp3`,
       },
       {
-        title: title,
+        title,
         performer: artist,
       },
     );
-
-    fs.unlink(filePath, () => {});
-  } catch (e) {
-    console.error(e);
 
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       msg.message_id,
       undefined,
-      "❌ Ошибка загрузки",
+      `✅ ${title} - ${artist} (${time}s)`,
     );
+  } catch (e) {
+    console.error("Download/send error:", e);
+
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        msg.message_id,
+        undefined,
+        "❌ Ошибка загрузки",
+      );
+    } catch (editError) {
+      console.error("Failed to edit status message:", editError);
+    }
+  } finally {
+    if (filePath) {
+      fs.unlink(filePath, (err) => {
+        if (err) console.error("Failed to delete file:", err);
+      });
+    }
   }
 });
 

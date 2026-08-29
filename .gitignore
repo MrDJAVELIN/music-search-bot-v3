@@ -1,5 +1,4 @@
 .env
 node_modules
 temp
-yarn.lock
 lists.json
