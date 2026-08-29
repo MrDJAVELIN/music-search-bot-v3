@@ -1,9 +1,16 @@
 import fs from "fs";
+import path from "path";
 
-const FILE = "./lists.json";
+const DATA_DIR = "/app/data";
+const FILE = path.join(DATA_DIR, "lists.json");
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
 function readDB() {
   if (!fs.existsSync(FILE)) return {};
+
   return JSON.parse(fs.readFileSync(FILE, "utf-8"));
 }
 
@@ -26,5 +33,6 @@ export function saveTrack(id, data) {
 
 export function getTrack(id) {
   const db = readDB();
+
   return db[id];
 }
