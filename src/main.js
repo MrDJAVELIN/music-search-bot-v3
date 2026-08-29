@@ -92,7 +92,29 @@ bot.action(/^track:(.+)$/, async (ctx) => {
   const start = Date.now();
 
   try {
+    console.log("1. Starting download");
+
     const { filePath } = await download(url);
+
+    console.log("2. Download finished:", filePath);
+
+    const file = fs.readFileSync(filePath);
+
+    console.log("3. File loaded:", file.length, "bytes");
+    console.log("4. Starting Telegram upload");
+
+    await ctx.replyWithAudio(
+      {
+        source: file,
+        filename: `${title}.mp3`,
+      },
+      {
+        title,
+        performer: artist,
+      },
+    );
+
+    console.log("5. Telegram upload OK");
 
     const time = ((Date.now() - start) / 1000).toFixed(1);
 
@@ -103,20 +125,9 @@ bot.action(/^track:(.+)$/, async (ctx) => {
       `✅ ${title} - ${artist} (${time}s)`,
     );
 
-    await ctx.replyWithAudio(
-      {
-        source: fs.createReadStream(filePath),
-        filename: `${title}.mp3`,
-      },
-      {
-        title: title,
-        performer: artist,
-      },
-    );
-
     fs.unlink(filePath, () => {});
   } catch (e) {
-    console.error(e);
+    console.error("DOWNLOAD/UPLOAD ERROR:", e);
 
     await ctx.telegram.editMessageText(
       ctx.chat.id,
