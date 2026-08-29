@@ -17,16 +17,12 @@ const isPrivate = (ctx) => ctx.chat?.type === "private";
 
 bot.start(async (ctx) => {
   await ctx.reply(
-    `SoundCloud Downloader
+    `🎵 **SoundCloud Downloader**
 
-Бот для поиска и загрузки музыки из SoundCloud.
+    Поиск и скачивание треков из SoundCloud.
 
-Функционал:
-— поиск треков по названию
-— выбор из результатов поиска
-— загрузка и отправка аудиофайла в Telegram
-
-Для начала работы отправьте название трека.`,
+    Отправьте название трека, чтобы начать.
+`,
   );
 });
 
