@@ -1,36 +1,46 @@
 import { Telegraf, Markup } from "telegraf";
-import fs from "fs";
-import crypto from "crypto";
+import fs from "node:fs";
+import crypto from "node:crypto";
 import { config } from "dotenv";
 
 import { search } from "./lib/search.js";
 import getSoundCloudClientId from "./lib/clientId.js";
 import { download } from "./lib/download.js";
 import { saveTrack, getTrack } from "./lib/db.js";
+import { message } from "telegraf/filters";
 
 config();
 
-const bot = new Telegraf(process.env.TOKEN);
+const token = process.env.TOKEN;
 
-let clientId = await getSoundCloudClientId();
-const isPrivate = (ctx) => ctx.chat?.type === "private";
+if (!token) {
+  throw new Error("TOKEN is not defined");
+}
+
+const bot = new Telegraf(token);
+
+const clientId = await getSoundCloudClientId();
+
+if (!clientId) {
+  throw new Error("Failed to get SoundCloud client ID");
+}
 
 bot.start(async (ctx) => {
   await ctx.reply(
     `🎵 SoundCloud Downloader
 
-    Поиск и скачивание треков из SoundCloud.
+Поиск и скачивание треков из SoundCloud.
 
-    Отправьте название трека, чтобы начать.
-`,
+Отправьте название трека, чтобы начать.`,
   );
 });
 
-bot.on("message", async (ctx) => {
+bot.on(message("text"), async (ctx) => {
   const text = ctx.message.text?.trim();
+
   if (!text) return;
 
-  const isPrivate = ctx.chat?.type === "private";
+  const isPrivate = ctx.chat.type === "private";
 
   if (!isPrivate && !text.startsWith("/msearch")) {
     return;
@@ -41,42 +51,50 @@ bot.on("message", async (ctx) => {
   if (!query) return;
 
   const list = await search(query, clientId);
-  const tracks = (list || []).filter((t) => t?.permalink_url).slice(0, 10);
+
+  const tracks = list.filter((track) => track?.permalink_url).slice(0, 10);
 
   if (!tracks.length) {
-    if (isPrivate) return ctx.reply("Ничего не найдено");
+    if (isPrivate) {
+      await ctx.reply("Ничего не найдено");
+    }
+
     return;
   }
 
-  const buttons = tracks.map((t) => {
+  const buttons = tracks.map((track) => {
     const id = crypto.randomUUID().slice(0, 8);
 
-    const artist = t.user?.username || t.user?.permalink || "unknown";
+    const artist = track.user?.username ?? track.user?.permalink ?? "unknown";
 
     saveTrack(id, {
-      url: t.permalink_url,
-      title: t.title,
+      url: track.permalink_url,
+      title: track.title,
       artist,
     });
 
     return Markup.button.callback(
-      `${t.title.slice(0, 40)} - ${artist}`,
+      `${track.title.slice(0, 40)} - ${artist}`,
       `track:${id}`,
     );
   });
 
   await ctx.reply(
     "Выбери трек:",
-    Markup.inlineKeyboard(buttons, { columns: 1 }),
+    Markup.inlineKeyboard(buttons, {
+      columns: 1,
+    }),
   );
 });
 
 bot.action(/^track:(.+)$/, async (ctx) => {
   const id = ctx.match[1];
+
   const data = getTrack(id);
 
   if (!data) {
-    return ctx.reply("Трек не найден");
+    await ctx.reply("Трек не найден");
+    return;
   }
 
   const { url, title, artist } = data;
@@ -122,8 +140,8 @@ bot.action(/^track:(.+)$/, async (ctx) => {
     );
 
     fs.unlink(filePath, () => {});
-  } catch (e) {
-    console.error("DOWNLOAD/UPLOAD ERROR:", e);
+  } catch (error) {
+    console.error("DOWNLOAD/UPLOAD ERROR:", error);
 
     await ctx.telegram.editMessageText(
       ctx.chat.id,
