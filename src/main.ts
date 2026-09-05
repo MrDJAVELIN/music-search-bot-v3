@@ -1,29 +1,28 @@
 import { Telegraf, Markup } from "telegraf";
-import fs from "node:fs";
-import crypto from "node:crypto";
+import { message } from "telegraf/filters";
 import { config } from "dotenv";
+import { readFile } from "node:fs/promises";
+import crypto from "node:crypto";
 
 import { search } from "./lib/search.js";
 import getSoundCloudClientId from "./lib/clientId.js";
-import { download } from "./lib/download.js";
+import { download, removeFile } from "./lib/downloader.js";
 import { saveTrack, getTrack } from "./lib/db.js";
-import { message } from "telegraf/filters";
+import { downloadQueue } from "./lib/queue.js";
 
 config();
 
 const token = process.env.TOKEN;
 
 if (!token) {
-  throw new Error("TOKEN is not defined");
+  throw new Error("TOKEN is not set in .env");
 }
 
 const bot = new Telegraf(token);
 
-const clientId = await getSoundCloudClientId();
+let clientId = await getSoundCloudClientId();
 
-if (!clientId) {
-  throw new Error("Failed to get SoundCloud client ID");
-}
+console.log("Bot started");
 
 bot.start(async (ctx) => {
   await ctx.reply(
@@ -36,120 +35,216 @@ bot.start(async (ctx) => {
 });
 
 bot.on(message("text"), async (ctx) => {
-  const text = ctx.message.text?.trim();
+  const text = ctx.message.text.trim();
 
   if (!text) return;
 
-  const isPrivate = ctx.chat.type === "private";
+  const chat = ctx.chat;
+
+  if (!chat) return;
+
+  const isPrivate = chat.type === "private";
 
   if (!isPrivate && !text.startsWith("/msearch")) {
     return;
   }
 
-  const query = isPrivate ? text : text.replace("/msearch", "").trim();
+  const query = isPrivate ? text : text.replace(/^\/msearch/, "").trim();
 
-  if (!query) return;
-
-  const list = await search(query, clientId);
-
-  const tracks = list.filter((track) => track?.permalink_url).slice(0, 10);
-
-  if (!tracks.length) {
-    if (isPrivate) {
-      await ctx.reply("Ничего не найдено");
+  if (!query) {
+    if (!isPrivate) {
+      await ctx.reply("Использование: /msearch название трека");
     }
 
     return;
   }
 
-  const buttons = tracks.map((track) => {
-    const id = crypto.randomUUID().slice(0, 8);
+  try {
+    const list = await search(query, clientId);
 
-    const artist = track.user?.username ?? track.user?.permalink ?? "unknown";
+    if (!list.length) {
+      if (isPrivate) {
+        await ctx.reply("Ничего не найдено");
+      }
 
-    saveTrack(id, {
-      url: track.permalink_url,
-      title: track.title,
-      artist,
+      return;
+    }
+
+    const buttons = list.map((track) => {
+      const id = crypto.randomUUID().slice(0, 8);
+
+      saveTrack(id, {
+        url: track.url,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        artwork: track.artwork,
+      });
+
+      return Markup.button.callback(
+        `${track.title.slice(0, 40)} - ${track.artist}`,
+        `track:${id}`,
+      );
     });
 
-    return Markup.button.callback(
-      `${track.title.slice(0, 40)} - ${artist}`,
-      `track:${id}`,
+    await ctx.reply(
+      "🎵 Выбери трек:",
+      Markup.inlineKeyboard(buttons, {
+        columns: 1,
+      }),
     );
-  });
+  } catch (error) {
+    console.error("SEARCH ERROR:", error);
 
-  await ctx.reply(
-    "Выбери трек:",
-    Markup.inlineKeyboard(buttons, {
-      columns: 1,
-    }),
-  );
+    try {
+      console.log("Refreshing SoundCloud Client ID...");
+
+      clientId = await getSoundCloudClientId();
+
+      console.log("SoundCloud Client ID refreshed");
+
+      const list = await search(query, clientId);
+
+      if (!list.length) {
+        if (isPrivate) {
+          await ctx.reply("Ничего не найдено");
+        }
+
+        return;
+      }
+
+      const buttons = list.map((track) => {
+        const id = crypto.randomUUID().slice(0, 8);
+
+        saveTrack(id, {
+          url: track.url,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          artwork: track.artwork,
+        });
+
+        return Markup.button.callback(
+          `${track.title.slice(0, 40)} - ${track.artist}`,
+          `track:${id}`,
+        );
+      });
+
+      await ctx.reply(
+        "🎵 Выбери трек:",
+        Markup.inlineKeyboard(buttons, {
+          columns: 1,
+        }),
+      );
+    } catch (retryError) {
+      console.error("SEARCH RETRY ERROR:", retryError);
+
+      await ctx.reply("❌ Ошибка поиска");
+    }
+  }
 });
 
 bot.action(/^track:(.+)$/, async (ctx) => {
+  if (!ctx.chat) return;
+
+  const chatId = ctx.chat.id;
   const id = ctx.match[1];
 
   const data = getTrack(id);
 
   if (!data) {
-    await ctx.reply("Трек не найден");
+    await ctx.answerCbQuery("Трек не найден");
+
     return;
   }
 
-  const { url, title, artist } = data;
+  await ctx.answerCbQuery("Добавлено в очередь");
 
-  await ctx.answerCbQuery("Скачивание...");
+  const msg = await ctx.reply(`⏳ Ожидание скачивания...\n\n${data.title}`);
 
-  const msg = await ctx.reply("⏳ Загрузка...");
+  downloadQueue.add(async () => {
+    const start = Date.now();
 
-  const start = Date.now();
+    try {
+      const stats = downloadQueue.stats;
 
-  try {
-    console.log("1. Starting download");
+      console.log(
+        `Download started: ${data.title} | running=${stats.running} waiting=${stats.waiting}`,
+      );
 
-    const { filePath } = await download(url);
+      await ctx.telegram.editMessageText(
+        chatId,
+        msg.message_id,
+        undefined,
+        `⬇️ Скачивание...\n\n${data.title}`,
+      );
 
-    console.log("2. Download finished:", filePath);
+      console.log(`Downloading: ${data.url}`);
 
-    const file = fs.createReadStream(filePath);
+      const result = await download(data.url, {
+        title: data.title,
+        artist: data.artist,
+        album: data.album,
+        artwork: data.artwork,
+      });
 
-    console.log("3. File loaded:", file.bytesRead, "bytes");
-    console.log("4. Starting Telegram upload");
+      console.log(`Download finished: ${result.filePath}`);
 
-    await ctx.replyWithAudio(
-      {
-        source: file,
-        filename: `${title}.mp3`,
-      },
-      {
-        title,
-        performer: artist,
-      },
-    );
+      const file = await readFile(result.filePath);
 
-    console.log("5. Telegram upload OK");
+      console.log(`File loaded: ${(file.length / 1024 / 1024).toFixed(2)} MB`);
 
-    const time = ((Date.now() - start) / 1000).toFixed(1);
+      await ctx.telegram.sendAudio(
+        chatId,
+        {
+          source: file,
+          filename: `${data.title}.mp3`,
+        },
+        {
+          title: data.title,
+          performer: data.artist,
+        },
+      );
 
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      msg.message_id,
-      undefined,
-      `✅ ${title} - ${artist} (${time}s)`,
-    );
+      const time = ((Date.now() - start) / 1000).toFixed(1);
 
-    fs.unlink(filePath, () => {});
-  } catch (error) {
-    console.error("DOWNLOAD/UPLOAD ERROR:", error);
+      await ctx.telegram.editMessageText(
+        chatId,
+        msg.message_id,
+        undefined,
+        `✅ ${data.title}\n\nЗагружено за ${time}s`,
+      );
 
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      msg.message_id,
-      undefined,
-      "❌ Ошибка загрузки",
-    );
-  }
+      console.log(`Upload finished: ${data.title} (${time}s)`);
+
+      await removeFile(result.filePath);
+    } catch (error) {
+      console.error(`DOWNLOAD ERROR [${data.title}]:`, error);
+
+      try {
+        await ctx.telegram.editMessageText(
+          chatId,
+          msg.message_id,
+          undefined,
+          `❌ Не удалось скачать:\n${data.title}`,
+        );
+      } catch (editError) {
+        console.error("Failed to edit error message:", editError);
+      }
+    }
+  });
+});
+
+bot.catch((error) => {
+  console.error("BOT ERROR:", error);
 });
 
 bot.launch();
+
+process.once("SIGINT", () => {
+  bot.stop("SIGINT");
+});
+
+process.once("SIGTERM", () => {
+  bot.stop("SIGTERM");
+});

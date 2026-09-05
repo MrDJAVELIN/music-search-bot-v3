@@ -1,52 +1,61 @@
 import fs from "node:fs";
 import path from "node:path";
 
-interface TrackData {
+const DATA_DIR = "./data";
+const FILE = path.join(DATA_DIR, "tracks.json");
+
+export interface Track {
   url: string;
   title: string;
   artist: string;
+  album: string | null;
+  artwork: string | null;
 }
 
-interface SavedTrack extends TrackData {
-  createdAt: number;
-}
+type Database = Record<string, Track>;
 
-type Database = Record<string, SavedTrack>;
-
-const DATA_DIR = "/app/data";
-const FILE = path.join(DATA_DIR, "lists.json");
-
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function readDB(): Database {
-  if (!fs.existsSync(FILE)) {
-    return {};
+function ensureDb(): void {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, {
+      recursive: true,
+    });
   }
+
+  if (!fs.existsSync(FILE)) {
+    fs.writeFileSync(FILE, "{}");
+  }
+}
+
+function readDb(): Database {
+  ensureDb();
 
   return JSON.parse(fs.readFileSync(FILE, "utf-8")) as Database;
 }
 
-function writeDB(data: Database): void {
+function writeDb(data: Database): void {
+  ensureDb();
+
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-export function saveTrack(id: string, data: TrackData): void {
-  const db = readDB();
+export function saveTrack(id: string, track: Track): void {
+  const db = readDb();
 
-  db[id] = {
-    url: data.url,
-    title: data.title,
-    artist: data.artist,
-    createdAt: Date.now(),
-  };
+  db[id] = track;
 
-  writeDB(db);
+  writeDb(db);
 }
 
-export function getTrack(id: string): SavedTrack | undefined {
-  const db = readDB();
+export function getTrack(id: string): Track | null {
+  const db = readDb();
 
-  return db[id];
+  return db[id] ?? null;
+}
+
+export function deleteTrack(id: string): void {
+  const db = readDb();
+
+  delete db[id];
+
+  writeDb(db);
 }

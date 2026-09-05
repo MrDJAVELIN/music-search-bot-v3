@@ -1,53 +1,66 @@
-export default async function getSoundCloudClientId(): Promise<string | null> {
-  const targetUrl = "https://soundcloud.com";
-  const userAgent =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const SOUNDCLOUD_URL = "https://soundcloud.com";
 
-  try {
-    const response = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": userAgent,
-      },
-    });
+function extractClientId(text: string): string | null {
+  const patterns = [
+    /client_id[=:]["']?([a-zA-Z0-9_-]{20,})/,
+    /client_id%3D([a-zA-Z0-9_-]{20,})/,
+  ];
 
-    const html = await response.text();
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
 
-    const scriptRegex = /src="([^"]+\/assets\/[^"]+\.js)"/g;
-    const scriptUrls: string[] = [];
-
-    let match: RegExpExecArray | null;
-
-    while ((match = scriptRegex.exec(html)) !== null) {
-      scriptUrls.push(match[1]);
+    if (match?.[1]) {
+      return match[1];
     }
-
-    scriptUrls.reverse();
-
-    const clientIdRegex = /client_id[:=]"([a-zA-Z0-9]{32})"/;
-
-    for (const scriptUrl of scriptUrls) {
-      const scriptRes = await fetch(scriptUrl, {
-        headers: {
-          "User-Agent": userAgent,
-        },
-      });
-
-      const scriptCode = await scriptRes.text();
-
-      const idMatch = scriptCode.match(clientIdRegex);
-
-      if (idMatch?.[1]) {
-        return idMatch[1];
-      }
-    }
-
-    throw new Error("Client ID pattern not found within asset scripts.");
-  } catch (error) {
-    console.error(
-      "Extraction failed:",
-      error instanceof Error ? error.message : error,
-    );
-
-    return null;
   }
+
+  return null;
+}
+
+export default async function getSoundCloudClientId(): Promise<string> {
+  const response = await fetch(SOUNDCLOUD_URL);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch SoundCloud: ${response.status}`);
+  }
+
+  const html = await response.text();
+
+  // Сначала проверяем сам HTML
+  const directClientId = extractClientId(html);
+
+  if (directClientId) {
+    console.log("SoundCloud Client ID found in HTML");
+
+    return directClientId;
+  }
+
+  // Затем ищем JS-бандлы
+  const scriptUrls = [
+    ...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g),
+  ].map((match) => match[1]);
+
+  for (const url of scriptUrls) {
+    const scriptUrl = new URL(url, SOUNDCLOUD_URL).href;
+
+    try {
+      const scriptResponse = await fetch(scriptUrl);
+
+      if (!scriptResponse.ok) continue;
+
+      const script = await scriptResponse.text();
+
+      const clientId = extractClientId(script);
+
+      if (clientId) {
+        console.log("SoundCloud Client ID found in JS");
+
+        return clientId;
+      }
+    } catch {
+      // продолжаем искать в следующем bundle
+    }
+  }
+
+  throw new Error("SoundCloud Client ID not found");
 }
