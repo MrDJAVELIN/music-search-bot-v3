@@ -112,9 +112,9 @@ bot.action(/^track:(.+)$/, async (ctx) => {
 
     console.log("2. Download finished:", filePath);
 
-    const file = fs.readFileSync(filePath);
+    const file = fs.createReadStream(filePath);
 
-    console.log("3. File loaded:", file.length, "bytes");
+    console.log("3. File loaded:", file.bytesRead, "bytes");
     console.log("4. Starting Telegram upload");
 
     await ctx.replyWithAudio(
