@@ -1,7 +1,7 @@
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 import { config } from "dotenv";
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import crypto from "node:crypto";
 
 import { search } from "./lib/search.js";
@@ -154,7 +154,6 @@ bot.action(/^track:(.+)$/, async (ctx) => {
 
   if (!data) {
     await ctx.answerCbQuery("Трек не найден");
-
     return;
   }
 
@@ -190,14 +189,18 @@ bot.action(/^track:(.+)$/, async (ctx) => {
 
       console.log(`Download finished: ${result.filePath}`);
 
-      const file = await readFile(result.filePath);
+      const fileSize = (
+        (await Bun.file(result.filePath).size) /
+        1024 /
+        1024
+      ).toFixed(2);
 
-      console.log(`File loaded: ${(file.length / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`File size: ${fileSize} MB`);
 
       await ctx.telegram.sendAudio(
         chatId,
         {
-          source: file,
+          source: createReadStream(result.filePath),
           filename: `${data.title}.mp3`,
         },
         {
